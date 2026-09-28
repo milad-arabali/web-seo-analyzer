@@ -93,6 +93,8 @@ class SEOAuditTests(unittest.TestCase):
                 "url": "https://example.com/timeout",
                 "status": 0,
                 "error": "TimeoutError",
+                "title": "",
+                "description": "",
             }],
         }
         issues = issue_for_sites([site], 250)
