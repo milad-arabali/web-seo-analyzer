@@ -1,4 +1,8 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from seo_audit import (
     PageParser,
@@ -6,6 +10,7 @@ from seo_audit import (
     issue_for_sites,
     markdown_report,
     normalize_url,
+    run,
 )
 
 
@@ -142,6 +147,45 @@ class SEOAuditTests(unittest.TestCase):
         self.assertIn("| شاخص | نتیجه |", report)
         self.assertIn("| صفحات بررسی‌شده | 0 |", report)
         self.assertLess(report.index("</div>"), report.index("## ۱. خلاصه مدیریتی"))
+
+    def test_run_keeps_small_state_and_removes_raw_data_files(self):
+        site = {
+            "root": "https://example.com/",
+            "robots": {
+                "url": "https://example.com/robots.txt",
+                "status": 200,
+                "error": "",
+            },
+            "sitemaps": ["https://example.com/sitemap.xml"],
+            "sitemap_url_count": 1,
+            "blocked_urls": [],
+            "discovered_url_count": 0,
+            "crawl_limit": 1,
+            "pages": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / "config.json"
+            output = root / "reports"
+            output.mkdir()
+            config_path.write_text(json.dumps({
+                "site_url": "https://example.com/",
+                "max_pages_per_site": 1,
+            }), encoding="utf-8")
+            (output / "latest-data.json").write_text(
+                '{"issues":[]}', encoding="utf-8"
+            )
+            (output / "2026-09-27-data.json").write_text(
+                '{"pages":[1,2,3]}', encoding="utf-8"
+            )
+            with patch("seo_audit.SiteCrawler") as crawler:
+                crawler.return_value.crawl.return_value = site
+                result = run(config_path, output)
+            self.assertTrue((output / ".seo-state.json").exists())
+            self.assertTrue((output / "latest.md").exists())
+            self.assertTrue((output / f"{result['report_date']}.md").exists())
+            self.assertFalse((output / "latest-data.json").exists())
+            self.assertFalse(list(output.glob("*-data.json")))
 
 
 if __name__ == "__main__":
