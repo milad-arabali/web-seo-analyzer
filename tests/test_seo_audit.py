@@ -128,6 +128,21 @@ class SEOAuditTests(unittest.TestCase):
             suggestions[0]["target"], "https://example.com/elderly-care"
         )
 
+    def test_report_uses_renderable_summary_table(self):
+        report = markdown_report({
+            "report_date": "2026-09-28",
+            "generated_at_tehran": "2026-09-28T13:00:00+03:30",
+            "config": {"max_pages_per_site": 30},
+            "primary_site": {"root": "https://example.com/", "pages": []},
+            "competitors": [],
+            "issues": [],
+            "resolved": [],
+            "internal_link_suggestions": [],
+        })
+        self.assertIn("| شاخص | نتیجه |", report)
+        self.assertIn("| صفحات بررسی‌شده | 0 |", report)
+        self.assertLess(report.index("</div>"), report.index("## ۱. خلاصه مدیریتی"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -636,19 +636,28 @@ def internal_link_suggestions(site: dict[str, Any], limit: int = 10) -> list[dic
 def markdown_report(data: dict[str, Any]) -> str:
     issues = data["issues"]
     severity_counts = Counter(item["severity"] for item in issues)
+    competitor_status = (
+        f"{len(data.get('competitors', []))} دامنه بررسی شد"
+        if data.get("competitors")
+        else "اجرا نشد؛ URL رقیب ثبت نشده یا امروز روز بررسی هفتگی نیست"
+    )
     lines = [
         '<div dir="rtl" align="right">',
-        "",
-        f"# گزارش SEO آنا درمان — {data['report_date']}",
-        "",
-        f"**زمان گزارش:** {data['generated_at_tehran']}  ",
-        f"**ابزار:** خزنده داخلی بدون API پولی  ",
+        f"<h1>گزارش SEO آنا درمان — {data['report_date']}</h1>",
+        f"<p><strong>زمان گزارش:</strong> {data['generated_at_tehran']}<br>",
+        "<strong>ابزار:</strong> خزنده داخلی بدون API پولی</p>",
+        "</div>",
         "",
         "## ۱. خلاصه مدیریتی",
         "",
-        f"{len(data['primary_site']['pages'])} صفحه از سایت اصلی بررسی شد. "
-        f"مشکلات: بحرانی {severity_counts['بحرانی']}، زیاد {severity_counts['زیاد']}، "
-        f"متوسط {severity_counts['متوسط']} و کم {severity_counts['کم']}.",
+        "| شاخص | نتیجه |",
+        "|---|---:|",
+        f"| صفحات بررسی‌شده | {len(data['primary_site']['pages'])} |",
+        f"| مشکلات بحرانی | {severity_counts['بحرانی']} |",
+        f"| مشکلات با اولویت زیاد | {severity_counts['زیاد']} |",
+        f"| مشکلات با اولویت متوسط | {severity_counts['متوسط']} |",
+        f"| مشکلات با اولویت کم | {severity_counts['کم']} |",
+        f"| وضعیت بررسی رقبا | {competitor_status} |",
         "",
         "## ۲. دامنه بررسی و محدودیت داده‌ها",
         "",
@@ -760,7 +769,7 @@ def markdown_report(data: dict[str, Any]) -> str:
         lines.append("")
         lines += [f"- {page['url']} — HTTP {page['status']}" for page in site["pages"]]
         lines.append("")
-    lines += ["</div>", ""]
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -784,11 +793,13 @@ def run(config_path: Path, output_dir: Path, force_competitors: bool = False) ->
     config = load_config(config_path)
     now = datetime.now(ZoneInfo(config["timezone"]))
     output_dir.mkdir(parents=True, exist_ok=True)
-    latest_data_path = output_dir / "latest-data.json"
+    state_path = output_dir / ".seo-state.json"
+    legacy_state_path = output_dir / "latest-data.json"
     previous = None
-    if latest_data_path.exists():
+    previous_path = state_path if state_path.exists() else legacy_state_path
+    if previous_path.exists():
         try:
-            previous = json.loads(latest_data_path.read_text(encoding="utf-8"))
+            previous = json.loads(previous_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             previous = None
     fetcher = Fetcher(
@@ -813,11 +824,21 @@ def run(config_path: Path, output_dir: Path, force_competitors: bool = False) ->
         "resolved": resolved,
         "internal_link_suggestions": internal_link_suggestions(primary),
     }
-    dated_data = output_dir / f"{data['report_date']}-data.json"
     report = markdown_report(data)
     dated_report = output_dir / f"{data['report_date']}.md"
-    dated_data.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    latest_data_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    state = {
+        "report_date": data["report_date"],
+        "issues": [
+            {"key": item["key"], "url": item["url"], "kind": item["kind"]}
+            for item in data["issues"]
+        ],
+    }
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    for legacy_path in output_dir.glob("*-data.json"):
+        legacy_path.unlink()
+    legacy_state_path.unlink(missing_ok=True)
     dated_report.write_text(report, encoding="utf-8")
     (output_dir / "latest.md").write_text(report, encoding="utf-8")
     return data
