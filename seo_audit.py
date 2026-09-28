@@ -31,7 +31,8 @@ HTML_TYPES = ("text/html", "application/xhtml+xml")
 WORD_RE = re.compile(r"[\w\u0600-\u06ff]{3,}", re.UNICODE)
 GENERIC_WORDS = {
     "برای", "این", "های", "است", "شود", "شده", "the", "and", "with", "from",
-    "درمان", "خدمات", "صفحه", "خانه", "تماس",
+    "درمان", "خدمات", "صفحه", "خانه", "تماس", "منزل", "تهران", "شمال",
+    "جنوب", "شرق", "غرب",
 }
 
 
@@ -118,12 +119,23 @@ class FetchResult:
 
 
 class Fetcher:
-    def __init__(self, timeout: int, max_bytes: int) -> None:
+    def __init__(self, timeout: int, max_bytes: int, retries: int = 1) -> None:
         self.timeout = timeout
         self.max_bytes = max_bytes
+        self.retries = retries
         self.validator = PublicURLValidator()
 
     def fetch(self, url: str) -> FetchResult:
+        result = FetchResult(url, url, 0, error="Request was not attempted")
+        for attempt in range(self.retries + 1):
+            result = self._fetch_once(url)
+            if result.status not in {0, 429, 502, 503, 504}:
+                return result
+            if attempt < self.retries:
+                time.sleep(0.5 * (attempt + 1))
+        return result
+
+    def _fetch_once(self, url: str) -> FetchResult:
         try:
             self.validator.validate(url)
             redirects = SafeRedirectHandler(self.validator)
@@ -470,11 +482,19 @@ def issue_for_sites(sites: list[dict[str, Any]], thin_words: int) -> list[Issue]
         for page in pages:
             url = page["url"]
             status = page["status"]
-            if status == 0 or status >= 500:
+            if status == 0:
                 issues.append(Issue(
-                    url, "خطای دسترسی یا سرور", "بحرانی",
-                    page["error"] or f"HTTP {status}", "صفحه برای کاربر و خزنده قابل دریافت نیست.",
-                    "لاگ سرور، DNS، TLS و پاسخ endpoint بررسی و خطا رفع شود.",
+                    url, "امکان بررسی صفحه وجود نداشت", "متوسط",
+                    page["error"] or "پاسخ HTTP دریافت نشد.",
+                    "این نتیجه خطای قطعی سایت نیست و وضعیت فنی صفحه نامشخص مانده است.",
+                    "صفحه از شبکه یا زمان دیگری دوباره بررسی شود؛ فقط در صورت تکرار، DNS، TLS و لاگ سرور بررسی شود.",
+                ))
+                continue
+            if status >= 500:
+                issues.append(Issue(
+                    url, "خطای سرور", "بحرانی",
+                    f"پاسخ قطعی HTTP {status}", "صفحه برای کاربر و خزنده قابل دریافت نیست.",
+                    "لاگ سرور و پاسخ endpoint بررسی و خطای 5xx رفع شود.",
                 ))
                 continue
             if status >= 400:
@@ -753,6 +773,7 @@ def load_config(path: Path) -> dict[str, Any]:
     config.setdefault("max_pages_per_site", 30)
     config.setdefault("request_delay_seconds", 0.25)
     config.setdefault("timeout_seconds", 15)
+    config.setdefault("network_retries", 1)
     config.setdefault("max_response_bytes", 2_000_000)
     config.setdefault("thin_content_words", 250)
     config.setdefault("competitor_weekday", 0)
@@ -770,7 +791,11 @@ def run(config_path: Path, output_dir: Path, force_competitors: bool = False) ->
             previous = json.loads(latest_data_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             previous = None
-    fetcher = Fetcher(config["timeout_seconds"], config["max_response_bytes"])
+    fetcher = Fetcher(
+        config["timeout_seconds"],
+        config["max_response_bytes"],
+        int(config["network_retries"]),
+    )
     primary = SiteCrawler(config["site_url"], config, fetcher).crawl()
     competitors: list[dict[str, Any]] = []
     if force_competitors or now.weekday() == int(config["competitor_weekday"]):

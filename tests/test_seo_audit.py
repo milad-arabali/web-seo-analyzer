@@ -1,6 +1,4 @@
-import tempfile
 import unittest
-from pathlib import Path
 
 from seo_audit import (
     PageParser,
@@ -80,6 +78,26 @@ class SEOAuditTests(unittest.TestCase):
         self.assertIn("Meta Description ناموجود", kinds)
         self.assertIn("تعداد نامناسب H1", kinds)
         self.assertIn("محتوای کم‌حجم", kinds)
+
+    def test_network_failure_is_not_claimed_as_server_error(self):
+        site = {
+            "root": "https://example.com/",
+            "robots": {
+                "url": "https://example.com/robots.txt",
+                "status": 200,
+                "error": "",
+            },
+            "sitemaps": ["https://example.com/sitemap.xml"],
+            "sitemap_url_count": 1,
+            "pages": [{
+                "url": "https://example.com/timeout",
+                "status": 0,
+                "error": "TimeoutError",
+            }],
+        }
+        issues = issue_for_sites([site], 250)
+        self.assertEqual(issues[0].kind, "امکان بررسی صفحه وجود نداشت")
+        self.assertEqual(issues[0].severity, "متوسط")
 
     def test_internal_link_suggestion_requires_topic_overlap(self):
         site = {
